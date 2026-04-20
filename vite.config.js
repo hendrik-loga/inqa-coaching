@@ -7,6 +7,12 @@ export default defineConfig({
     include: ['@excalidraw/excalidraw'],
   },
   build: {
+    rollupOptions: {
+      input: {
+        main:    'index.html',
+        scanner: 'scanner.html',
+      },
+    },
     commonjsOptions: {
       include: [/@excalidraw\/excalidraw/, /node_modules/],
     },
