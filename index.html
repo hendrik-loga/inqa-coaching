@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#00004a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Visitenkarten Scanner" />
+  <title>Visitenkarten Scanner</title>
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --navy: #00004a; --red: #c0003c; --bg: #f8fafc; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #000; color: #fff; min-height: 100dvh; -webkit-tap-highlight-color: transparent; }
+
+    /* Header */
+    #header { background: var(--navy); padding: 14px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 10; }
+    #header .logo { width: 32px; height: 32px; border-radius: 50%; background: var(--red); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0; }
+    #header span { font-weight: 600; font-size: 16px; }
+
+    /* Error bar */
+    #errorBar { background: #7f1d1d; padding: 12px 16px; font-size: 14px; display: none; align-items: center; justify-content: space-between; }
+    #errorBar button { background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; line-height: 1; }
+
+    /* Screens */
+    .screen { display: none; }
+    .screen.active { display: flex; flex-direction: column; }
+
+    /* ── CAMERA ── */
+    #cameraScreen { position: relative; height: calc(100dvh - 58px); }
+    #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #cameraOverlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+    #cardGuide { position: relative; width: 86vw; aspect-ratio: 1.75; border: 2px solid rgba(255,255,255,0.8); border-radius: 10px; }
+    #cardGuide .hint { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.55); padding: 3px 12px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
+    .corner { position: absolute; width: 18px; height: 18px; }
+    .corner.tl { top: 0; left: 0; border-top: 2.5px solid #fff; border-left: 2.5px solid #fff; }
+    .corner.tr { top: 0; right: 0; border-top: 2.5px solid #fff; border-right: 2.5px solid #fff; }
+    .corner.bl { bottom: 0; left: 0; border-bottom: 2.5px solid #fff; border-left: 2.5px solid #fff; }
+    .corner.br { bottom: 0; right: 0; border-bottom: 2.5px solid #fff; border-right: 2.5px solid #fff; }
+    #captureBtn { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); width: 76px; height: 76px; border-radius: 50%; background: #fff; border: 4px solid rgba(255,255,255,0.35); cursor: pointer; display: flex; align-items: center; justify-content: center; pointer-events: all; }
+    #captureBtn svg { display: block; }
+    #noCameraMsg { display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: calc(100dvh - 58px); padding: 32px; text-align: center; }
+
+    /* ── PROCESSING ── */
+    #processingScreen { align-items: center; justify-content: center; gap: 20px; height: calc(100dvh - 58px); padding: 24px; }
+    #preview { max-width: 90%; max-height: 36vh; border-radius: 10px; display: block; }
+    #progressBar { width: 80%; height: 8px; background: #1a1a2e; border-radius: 8px; overflow: hidden; }
+    #progressFill { height: 100%; background: var(--red); width: 0%; transition: width 0.3s; }
+    #progressText { font-size: 15px; color: #ccc; }
+
+    /* ── PREVIEW / FORM ── */
+    #formScreen { background: var(--bg); color: #111; min-height: calc(100dvh - 58px); overflow-y: auto; }
+    #formInner { padding: 20px 16px 40px; }
+    .formHeader { text-align: center; padding-bottom: 4px; }
+    .formHeader .icon { width: 60px; height: 60px; border-radius: 50%; background: rgba(0,0,74,0.08); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+    .formHeader h2 { font-size: 18px; color: var(--navy); margin-bottom: 4px; }
+    .formHeader p { font-size: 13px; color: #666; }
+    .fieldGroup { margin-top: 20px; }
+    .fieldGroup .groupLabel { font-size: 11px; font-weight: 600; color: #888; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; padding-left: 4px; }
+    .fieldGroup .fields { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+    .field { padding: 10px 14px; border-bottom: 1px solid #f1f1f1; }
+    .field:last-child { border-bottom: none; }
+    .field label { display: block; font-size: 11px; color: #888; margin-bottom: 2px; }
+    .field input { width: 100%; border: none; outline: none; font-size: 15px; background: transparent; color: #111; font-family: inherit; }
+    .btnPrimary { width: 100%; padding: 15px; background: var(--navy); color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 20px; font-family: inherit; }
+    .btnSecondary { width: 100%; padding: 14px; background: #e5e7eb; color: #111; border: none; border-radius: 12px; font-size: 15px; cursor: pointer; margin-top: 10px; font-family: inherit; }
+
+    /* ── DONE ── */
+    #doneScreen { align-items: center; justify-content: center; gap: 16px; height: calc(100dvh - 58px); padding: 32px; text-align: center; }
+    #doneScreen .emoji { font-size: 64px; }
+    #doneScreen h2 { font-size: 22px; }
+    #doneScreen p { color: #aaa; font-size: 15px; }
+    #doneScreen button { padding: 14px 32px; background: var(--red); color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px; font-family: inherit; }
+
+    #canvas { display: none; }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div class="logo">VK</div>
+  <span>Visitenkarten Scanner</span>
+</div>
+
+<div id="errorBar">
+  <span id="errorMsg"></span>
+  <button onclick="hideError()">✕</button>
+</div>
+
+<!-- CAMERA -->
+<div id="cameraScreen" class="screen active">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="cameraOverlay">
+    <div id="cardGuide">
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+      <div class="hint">Visitenkarte in den Rahmen legen</div>
+    </div>
+  </div>
+  <button id="captureBtn" onclick="capture()">
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+      <circle cx="12" cy="13" r="4"/>
+    </svg>
+  </button>
+  <div id="noCameraMsg">
+    <div style="font-size:48px">📷</div>
+    <h3>Kamerazugriff benötigt</h3>
+    <p style="color:#aaa;font-size:14px">Bitte erlaube den Kamerazugriff in den Browser-Einstellungen und lade die Seite neu.</p>
+  </div>
+</div>
+
+<!-- PROCESSING -->
+<div id="processingScreen" class="screen">
+  <img id="preview" src="" alt="" />
+  <div id="progressBar"><div id="progressFill"></div></div>
+  <p id="progressText">Visitenkarte wird analysiert… 0%</p>
+</div>
+
+<!-- FORM -->
+<div id="formScreen" class="screen">
+  <div id="formInner">
+    <div class="formHeader">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00004a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+        </svg>
+      </div>
+      <h2>Kontakt prüfen &amp; speichern</h2>
+      <p>Erkannte Daten können direkt bearbeitet werden</p>
+    </div>
+
+    <div class="fieldGroup">
+      <div class="groupLabel">Name</div>
+      <div class="fields">
+        <div class="field"><label>Vorname</label><input id="f_firstName" type="text" autocapitalize="words" /></div>
+        <div class="field"><label>Nachname</label><input id="f_lastName" type="text" autocapitalize="words" /></div>
+        <div class="field"><label>Position / Titel</label><input id="f_jobTitle" type="text" autocapitalize="words" /></div>
+        <div class="field"><label>Unternehmen</label><input id="f_company" type="text" autocapitalize="words" /></div>
+      </div>
+    </div>
+
+    <div class="fieldGroup">
+      <div class="groupLabel">Kontakt</div>
+      <div class="fields">
+        <div class="field"><label>Telefon</label><input id="f_phone" type="tel" /></div>
+        <div class="field"><label>Mobil</label><input id="f_mobile" type="tel" /></div>
+        <div class="field"><label>E-Mail</label><input id="f_email" type="email" autocapitalize="none" /></div>
+        <div class="field"><label>Website</label><input id="f_website" type="url" autocapitalize="none" /></div>
+      </div>
+    </div>
+
+    <div class="fieldGroup">
+      <div class="groupLabel">Adresse</div>
+      <div class="fields">
+        <div class="field"><label>Straße &amp; Hausnummer</label><input id="f_street" type="text" autocapitalize="words" /></div>
+        <div class="field"><label>PLZ</label><input id="f_postalCode" type="text" inputmode="numeric" /></div>
+        <div class="field"><label>Stadt</label><input id="f_city" type="text" autocapitalize="words" /></div>
+        <div class="field"><label>Land</label><input id="f_country" type="text" autocapitalize="words" /></div>
+      </div>
+    </div>
+
+    <button class="btnPrimary" onclick="saveContact()">📇 Zu Kontakten hinzufügen</button>
+    <button class="btnSecondary" onclick="reset()">🔄 Neu scannen</button>
+  </div>
+</div>
+
+<!-- DONE -->
+<div id="doneScreen" class="screen">
+  <div class="emoji">✅</div>
+  <h2>Kontakt gespeichert!</h2>
+  <p>Der Kontakt wurde zu Ihren Kontakten hinzugefügt.</p>
+  <button onclick="reset()">Nächste Visitenkarte scannen</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+// ── State ─────────────────────────────────────────────────────
+let stream = null
+
+// ── Screen management ─────────────────────────────────────────
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'))
+  document.getElementById(id).classList.add('active')
+}
+
+function showError(msg) {
+  document.getElementById('errorMsg').textContent = msg
+  document.getElementById('errorBar').style.display = 'flex'
+}
+
+function hideError() {
+  document.getElementById('errorBar').style.display = 'none'
+}
+
+// ── Camera ────────────────────────────────────────────────────
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    })
+    const video = document.getElementById('video')
+    video.srcObject = stream
+    video.style.display = 'block'
+    document.getElementById('captureBtn').style.display = 'flex'
+    document.getElementById('noCameraMsg').style.display = 'none'
+  } catch (e) {
+    document.getElementById('video').style.display = 'none'
+    document.getElementById('captureBtn').style.display = 'none'
+    document.getElementById('noCameraMsg').style.display = 'flex'
+  }
+}
+
+function stopCamera() {
+  stream?.getTracks().forEach(t => t.stop())
+  stream = null
+}
+
+// ── Capture & OCR ─────────────────────────────────────────────
+async function capture() {
+  const video = document.getElementById('video')
+  const canvas = document.getElementById('canvas')
+  canvas.width  = video.videoWidth  || 1280
+  canvas.height = video.videoHeight || 720
+  canvas.getContext('2d').drawImage(video, 0, 0)
+
+  document.getElementById('preview').src = canvas.toDataURL('image/jpeg', 0.9)
+  stopCamera()
+  setProgress(0)
+  show('processingScreen')
+
+  try {
+    const worker = await Tesseract.createWorker(['deu', 'eng'], 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') setProgress(Math.round(m.progress * 100))
+      }
+    })
+    const { data: { text } } = await worker.recognize(canvas)
+    await worker.terminate()
+
+    const contact = parseBusinessCard(text)
+    fillForm(contact)
+    show('formScreen')
+  } catch (e) {
+    showError('Texterkennung fehlgeschlagen. Bitte erneut versuchen.')
+    reset()
+  }
+}
+
+function setProgress(pct) {
+  document.getElementById('progressFill').style.width = pct + '%'
+  document.getElementById('progressText').textContent = `Visitenkarte wird analysiert… ${pct}%`
+}
+
+// ── Form ──────────────────────────────────────────────────────
+function fillForm(c) {
+  document.getElementById('f_firstName').value  = c.firstName  || ''
+  document.getElementById('f_lastName').value   = c.lastName   || ''
+  document.getElementById('f_jobTitle').value   = c.jobTitle   || ''
+  document.getElementById('f_company').value    = c.company    || ''
+  document.getElementById('f_phone').value      = c.phone      || ''
+  document.getElementById('f_mobile').value     = c.mobile     || ''
+  document.getElementById('f_email').value      = c.email      || ''
+  document.getElementById('f_website').value    = c.website    || ''
+  document.getElementById('f_street').value     = c.street     || ''
+  document.getElementById('f_postalCode').value = c.postalCode || ''
+  document.getElementById('f_city').value       = c.city       || ''
+  document.getElementById('f_country').value    = c.country    || ''
+}
+
+function getFormContact() {
+  return {
+    firstName:  document.getElementById('f_firstName').value.trim(),
+    lastName:   document.getElementById('f_lastName').value.trim(),
+    jobTitle:   document.getElementById('f_jobTitle').value.trim(),
+    company:    document.getElementById('f_company').value.trim(),
+    phone:      document.getElementById('f_phone').value.trim(),
+    mobile:     document.getElementById('f_mobile').value.trim(),
+    email:      document.getElementById('f_email').value.trim(),
+    website:    document.getElementById('f_website').value.trim(),
+    street:     document.getElementById('f_street').value.trim(),
+    postalCode: document.getElementById('f_postalCode').value.trim(),
+    city:       document.getElementById('f_city').value.trim(),
+    country:    document.getElementById('f_country').value.trim(),
+  }
+}
+
+// ── Save / Share ──────────────────────────────────────────────
+async function saveContact() {
+  const contact = getFormContact()
+  const vcf = generateVCard(contact)
+  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'kontakt'
+  const file = new File([vcf], `${contact.lastName || name}.vcf`, { type: 'text/vcard' })
+
+  try {
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: name })
+    } else {
+      const url = URL.createObjectURL(new Blob([vcf], { type: 'text/vcard' }))
+      window.location.href = url
+    }
+    show('doneScreen')
+  } catch (e) {
+    if (e.name !== 'AbortError') showError('Speichern fehlgeschlagen: ' + e.message)
+  }
+}
+
+// ── Reset ─────────────────────────────────────────────────────
+function reset() {
+  hideError()
+  show('cameraScreen')
+  startCamera()
+}
+
+// ── Business card parser ──────────────────────────────────────
+function parseBusinessCard(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  const c = { firstName:'', lastName:'', jobTitle:'', company:'', email:'',
+               phone:'', mobile:'', website:'', street:'', city:'', postalCode:'', country:'' }
+  const used = new Set()
+
+  // Email
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
+    if (m) { c.email = m[0]; used.add(i); break }
+  }
+
+  // Phone numbers
+  const phones = []
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue
+    const ms = [...lines[i].matchAll(/(?:\+\d{1,3}[\s\-/]?)?(?:\(0\d{1,4}\)|\d{1,5})[\s\-/\.]?\d{2,5}(?:[\s\-/\.]\d{1,5})*/g)]
+    const valid = ms.map(m => m[0].trim()).filter(p => p.replace(/\D/g,'').length >= 6)
+    if (valid.length) { phones.push(...valid); used.add(i) }
+  }
+  if (phones[0]) c.phone  = phones[0]
+  if (phones[1]) c.mobile = phones[1]
+
+  // Website
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue
+    const m = lines[i].match(/(?:https?:\/\/)?(?:www\.)[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(?:\/[^\s]*)?/)
+    if (m) { c.website = m[0].startsWith('http') ? m[0] : 'https://' + m[0]; used.add(i); break }
+  }
+
+  // Company
+  const coWords = ['GmbH','AG',' KG','OHG',' SE','e.V.','Ltd','LLC','Inc.','GbR','UG ',
+                   'Gruppe','Group','Consulting','Solutions','Services','Systems']
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue
+    if (coWords.some(w => lines[i].toLowerCase().includes(w.toLowerCase()))) {
+      c.company = lines[i]; used.add(i); break
+    }
+  }
+
+  // Postal code + city
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue
+    const m = lines[i].match(/(?<!\d)(\d{5})(?!\d)/)
+    if (m) {
+      c.postalCode = m[1]
+      c.city = lines[i].replace(m[1],'').trim().replace(/^[,\s]+/,'')
+      used.add(i)
+      if (i > 0 && !used.has(i-1) && /str\.|straße|strasse|gasse|weg|allee|platz|ring/i.test(lines[i-1])) {
+        c.street = lines[i-1]; used.add(i-1)
+      }
+      break
+    }
+  }
+
+  // Job title
+  const titleWords = ['Manager','Direktor','Director','CEO','CFO','CTO','COO','Geschäftsführer',
+    'Leiter','Head of','Senior','Junior','Berater','Consultant','Entwickler','Ingenieur',
+    'Engineer','Coach','Trainer','Analyst','Designer','Assistent','Koordinator','Vertrieb','Sales']
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue
+    if (titleWords.some(w => lines[i].toLowerCase().includes(w.toLowerCase()))) {
+      c.jobTitle = lines[i]; used.add(i); break
+    }
+  }
+
+  // Name
+  const remaining = lines.filter((_,i) => !used.has(i))
+  let found = false
+  for (const line of remaining) {
+    const words = line.split(' ').filter(Boolean)
+    if (words.length >= 2 && words.length <= 5 && !/\d/.test(line)) {
+      const allCap = words.every(w => /^[A-ZÄÖÜ]/.test(w) || ['von','van','de','der','den'].includes(w.toLowerCase()))
+      if (allCap) {
+        c.firstName = words.slice(0,-1).join(' ')
+        c.lastName  = words[words.length-1]
+        found = true; break
+      }
+    }
+  }
+  if (!found && remaining[0]) {
+    const words = remaining[0].split(' ').filter(Boolean)
+    c.firstName = words.slice(0,-1).join(' ')
+    c.lastName  = words[words.length-1] || remaining[0]
+  }
+
+  return c
+}
+
+// ── vCard generator ───────────────────────────────────────────
+function generateVCard(c) {
+  const esc = s => (s||'').replace(/,/g,'\\,').replace(/;/g,'\\;')
+  const fullName = [c.firstName, c.lastName].filter(Boolean).join(' ')
+  const lines = [
+    'BEGIN:VCARD', 'VERSION:3.0',
+    `FN:${esc(fullName)}`,
+    `N:${esc(c.lastName)};${esc(c.firstName)};;;`,
+  ]
+  if (c.company)    lines.push(`ORG:${esc(c.company)}`)
+  if (c.jobTitle)   lines.push(`TITLE:${esc(c.jobTitle)}`)
+  if (c.phone)      lines.push(`TEL;TYPE=WORK,VOICE:${c.phone}`)
+  if (c.mobile)     lines.push(`TEL;TYPE=CELL,VOICE:${c.mobile}`)
+  if (c.email)      lines.push(`EMAIL;TYPE=WORK:${c.email}`)
+  if (c.website)    lines.push(`URL;TYPE=WORK:${c.website}`)
+  if (c.street || c.city)
+    lines.push(`ADR;TYPE=WORK:;;${esc(c.street)};${esc(c.city)};;${esc(c.postalCode)};${esc(c.country||'Deutschland')}`)
+  lines.push('END:VCARD')
+  return lines.join('\r\n')
+}
+
+// ── Init ──────────────────────────────────────────────────────
+startCamera()
+</script>
+</body>
+</html>
