@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { supabase } from "./lib/supabase";
+import ToolLandscapeDesigner from "./ToolLandscapeDesigner";
 
 const Excalidraw = lazy(() =>
   import("@excalidraw/excalidraw").then((mod) => ({ default: mod.Excalidraw }))
@@ -41,6 +42,7 @@ const MODULE_TYPES = {
   prozesslandkarte: "Prozesslandkarte",
   todo: "ToDo-Liste",
   whiteboard: "Whiteboard",
+  toollandschaft: "Toollandschaft Designer",
 };
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -481,14 +483,38 @@ function TodoModule({ modul, tenantId, userRole }) {
 
 // ── Modul-Renderer ───────────────────────────────────────────────────────────
 
+function ToollandschaftModule({ modul }) {
+  const saveTimer = useRef(null);
+
+  async function handleSave(data) {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      await supabase.from("modules").update({ data }).eq("id", modul.id);
+    }, 1500);
+  }
+
+  return (
+    <div style={{ height: "calc(100vh - 120px)", display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "0 0 12px" }}>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#00004a" }}>{modul.title}</h3>
+        {modul.description && <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>{modul.description}</p>}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ToolLandscapeDesigner modul={modul} onSave={handleSave} />
+      </div>
+    </div>
+  );
+}
+
 function ModulRenderer({ modul, tenantId, userRole }) {
   const props = { modul, tenantId, userRole };
   switch (modul.type) {
-    case "whiteboard": return <WhiteboardModule {...props} />;
-    case "issue_map": return <IssueMapModule {...props} />;
-    case "eisenhower": return <EisenhowerModule {...props} />;
-    case "prozesslandkarte": return <ProzesslandkarteModule {...props} />;
-    case "todo": return <TodoModule {...props} />;
+    case "whiteboard":      return <WhiteboardModule {...props} />;
+    case "issue_map":       return <IssueMapModule {...props} />;
+    case "eisenhower":      return <EisenhowerModule {...props} />;
+    case "prozesslandkarte":return <ProzesslandkarteModule {...props} />;
+    case "todo":            return <TodoModule {...props} />;
+    case "toollandschaft":  return <ToollandschaftModule {...props} />;
     default: return <p style={{ color: "#9ca3af" }}>Unbekannter Modultyp: {modul.type}</p>;
   }
 }
